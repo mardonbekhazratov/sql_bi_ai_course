@@ -1,10 +1,10 @@
-with fibonacci(Fibonacci_number, Prev) as 
+with fibonacci(n, Fibonacci_number, Prev) as 
 (
-    select 1, 0
+    select 1, 1, 0
     union ALL
-    select Fibonacci_number + Prev, Fibonacci_number
+    select n + 1, Fibonacci_number + Prev, Fibonacci_number
     from fibonacci
-    where Fibonacci_number + Prev < 101
+    where n < 10
 )
-select Fibonacci_number from fibonacci;
+select n, Fibonacci_number from fibonacci;
 
