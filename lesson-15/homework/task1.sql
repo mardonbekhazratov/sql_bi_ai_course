@@ -27,43 +27,95 @@ VALUES
     ('vid', '654321', 'Michael', 'Davis', 'http://davistech.com', 'Davis Technologies', '555-444-5555', '99 Tech Park', 'Seattle', 'WA', '98109'),
     ('email', 'oliver.queen@starcity.com', 'Oliver', 'Queen', 'http://starcity.com', 'Star City Industries', '555-777-8888', '567 Arrow St', 'Star City', 'CA', '94016');
 
+-- select * from Contacts;
 
-declare @query nvarchar(max);
 
-with columns as (
-    select name, 
-        row_number() over(order by (select null)) as rnk
-    from sys.columns 
-    where object_id = OBJECT_ID('Contacts') 
-        and name not in ('identifier_name', 'identifier_value')
-)
-select @query = concat(@query, case when rnk > 1 then ', ' end, name) from columns;
 
-select @query = concat('select col, val, row_number() over(order by (select null)) rnk from Contacts unpivot(val for col in (', @query, ')) as unpvt');
--- select @query;
--- select col, val, row_number() over(order by (select null)) rnk from Contacts unpivot(val for col in (address, city, company, firstname, lastname, phone, state, website, zip)) as unpvt;
-
-declare @temp table (
-    col varchar(50), val varchar(50), rnk varchar(50)
-);
-
-insert into @temp
-exec sp_executesql @query;
-
-select * from @temp;
+GO
 
 declare @ans varchar(max) = '[';
+declare @i int = 0;
+declare @numberOfContacts int = (select max(rnk) from (select *, row_number() over(order by (select null)) as rnk from Contacts) t);
+declare @numOfColumns int = (select count(*)
+        from INFORMATION_SCHEMA.COLUMNS 
+        where TABLE_NAME = 'Contacts'
+                AND column_name NOT IN ('identifier_name', 'identifier_value')
+    );
 
-select @ans = concat(@ans, 
-    '
+declare @query nvarchar(MAX) = '';
+
+-- Build the UNPIVOT column list
+with columns as (
+    select column_name as name, 
+        ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS rnk
+    from INFORMATION_SCHEMA.COLUMNS 
+    where TABLE_NAME = 'Contacts'
+        AND column_name NOT IN ('identifier_name', 'identifier_value')
+)
+select @query = CONCAT(@query, CASE WHEN rnk > 1 THEN ', ' ELSE '' END, name)
+from columns;
+
+-- Construct the UNPIVOT query with a CTE
+set @query = CONCAT('
+    WITH unpivoted AS (
+        SELECT col, val, 
+                ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS rnk
+        FROM Contacts 
+        UNPIVOT (val FOR col IN (', @query, ')) AS unpvt
+    )
+    SELECT col, val, row_number() over(order by (select null)) as rnk
+    FROM unpivoted'
+);
+
+-- Execute the dynamic query
+declare @columns table (
+    col varchar(50), val varchar(50), rnk int
+);
+
+insert into @columns
+exec sp_executesql @query;
+
+while @i < @numberOfContacts
+BEGIN
+
+    set @i = @i + 1;
+
+    select @ans = concat(@ans, case when @i <> 1 then ',' end);
+    
+    -- Add identifier
+    with cte as(
+        select *, 
+            row_number() over(order by (select null)) as rnk 
+        from Contacts
+    )
+    select @ans = concat(@ans, 
+        case when ROW_NUMBER() over(order by (select null)) > 1 then ', ' end,
+        '
     {
-        "', 
-        identifier_name, '" : "', identifier_value, 
-    '", 
-    properties: [',
-    '
-        {
-            "property" : ')
-from Contacts;
+        "', identifier_name, '" : "', identifier_value, 
+        '", 
+        "properties": ['
+    ) from cte
+    where @i = rnk;
 
-print @ans;
+
+    select @ans = concat(@ans, case when rnk % @numOfColumns <> 1 then ',' end,
+    '
+            {
+                "property" : "', col, 
+                '",
+                "value" : "', val,
+                '"
+            }') from @columns
+    where (rnk - 1) / @numOfColumns + 1 = @i;
+
+    select @ans = concat(@ans, 
+        '
+        ]
+    }')
+
+END;
+
+select @ans = concat(@ans, ']')
+
+select @ans;
