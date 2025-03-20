@@ -86,6 +86,7 @@ where quantity = 0;
 
 set @i = 0;
 
+drop table if exists #ans;
 create table #ans(
     starting int,
     ending int,
